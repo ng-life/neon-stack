@@ -46,5 +46,6 @@ cp -R "$APP_BUNDLE" "$STAGE_DIR/Neon Stack.app"
 ln -s /Applications "$STAGE_DIR/Applications"
 hdiutil create -quiet -volname 'Neon Stack' -srcfolder "$STAGE_DIR" -ov -format UDZO "$DMG_PATH"
 hdiutil verify "$DMG_PATH"
-shasum -a 256 "$DMG_PATH" > "$DMG_PATH.sha256"
+# 校验文件使用相对文件名，下载发布附件后仍可直接检查。
+(cd "$ROOT_DIR/dist" && shasum -a 256 "$(basename "$DMG_PATH")" > "$(basename "$DMG_PATH").sha256")
 echo "$DMG_PATH"

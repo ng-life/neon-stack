@@ -1,0 +1,102 @@
+name: 构建与发布 Neon Stack
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: 测试并打包 Universal DMG
+    runs-on: xcode-27
+    timeout-minutes: 45
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 验证工具链
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: 运行测试
+        run: swift test
+
+      - name: 构建 DMG
+        run: ./script/package_universal_dmg.sh
+
+      - name: 验证发布产物
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd dist && shasum -a 256 -c NeonStack-universal.dmg.sha256)
+          mount_dir="$(mktemp -d "$RUNNER_TEMP/neon-stack.XXXXXX")"
+          trap 'hdiutil detach "$mount_dir" -quiet; rmdir "$mount_dir"' EXIT
+          hdiutil attach dist/NeonStack-universal.dmg -mountpoint "$mount_dir" -nobrowse -readonly -quiet
+          app="$mount_dir/Neon Stack.app"
+          archs="$(lipo -archs "$app/Contents/MacOS/NeonTetris")"
+          [[ " $archs " == *' arm64 '* && " $archs " == *' x86_64 '* ]]
+          xcrun vtool -show-build -arch arm64 "$app/Contents/MacOS/NeonTetris" | grep -q 'minos 15.0'
+          xcrun vtool -show-build -arch x86_64 "$app/Contents/MacOS/NeonTetris" | grep -q 'minos 15.0'
+          codesign --verify --deep --strict "$app"
+          test "$(find "$app/Contents/Resources/NeonTetris_NeonTetris.bundle/Contents/Resources/Backgrounds" -name '*.jpg' | wc -l | tr -d ' ')" = 10
+          test "$(readlink "$mount_dir/Applications")" = /Applications
+
+      - name: 保存构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: NeonStack-universal
+          path: |
+            dist/NeonStack-universal.dmg
+            dist/NeonStack-universal.dmg.sha256
+          if-no-files-found: error
+
+  release:
+    name: 发布 GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: 检查版本 tag
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]
+
+      - name: 下载已验证的 DMG
+        uses: actions/download-artifact@v4
+        with:
+          name: NeonStack-universal
+          path: dist
+
+      - name: 验证下载的附件
+        run: cd dist && sha256sum -c NeonStack-universal.dmg.sha256
+
+      - name: 创建版本
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          release_flags=()
+          if [[ "$RELEASE_TAG" == *-* ]]; then
+            release_flags+=(--prerelease)
+          fi
+          gh release create "$RELEASE_TAG" \
+            dist/NeonStack-universal.dmg \
+            dist/NeonStack-universal.dmg.sha256 \
+            --verify-tag \
+            --title "Neon Stack $RELEASE_TAG" \
+            --generate-notes \
+            --notes '支持 macOS 15 及以上，包含 Apple Silicon 与 Intel 双架构。此 DMG 使用临时签名，尚未经过 Apple 公证。' \
+            "${release_flags[@]}"

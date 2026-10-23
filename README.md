@@ -24,6 +24,15 @@
 
 产物为 `dist/NeonStack-universal.dmg`，可将磁盘映像中的 Neon Stack 拖入“应用程序”。脚本不会关闭正在运行的游戏。该安装包使用本地临时签名，尚未正式签名或公证；最低支持 macOS 15。
 
+GitHub Actions 在推送到 `main` 或提交 PR 时运行测试、打包并保存构建产物。推送 `v1.2.3` 格式的版本 tag 后，同一流程通过验证才创建 GitHub Release，上传 DMG 与 SHA-256 校验文件；带后缀的 tag（如 `v1.2.3-beta.1`）会标为预发布。发布示例：
+
+```sh
+git tag v1.2.3
+git push origin v1.2.3
+```
+
+Release 当前仍为临时签名、未公证版本。发布前需人工确认版本内容与目标提交；正式签名和公证另行完成。
+
 ```sh
 swift test                          # 规则测试
 ./script/build_and_run.sh --verify   # 构建、启动并检查进程
