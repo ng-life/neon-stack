@@ -17,7 +17,7 @@ jobs:
     timeout-minutes: 45
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: 验证工具链
         run: |
@@ -48,7 +48,7 @@ jobs:
           test "$(readlink "$mount_dir/Applications")" = /Applications
 
       - name: 保存构建产物
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: NeonStack-universal
           path: |
@@ -72,7 +72,7 @@ jobs:
           [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]
 
       - name: 下载已验证的 DMG
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: NeonStack-universal
           path: dist
