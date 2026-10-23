@@ -16,6 +16,14 @@
 
 脚本会停止已有 NeonTetris 进程、构建应用、生成 `dist/NeonTetris.app` 并启动。生成的应用使用本地临时签名，尚未公证。Codex 的 Run 按钮使用同一脚本。
 
+制作 Apple Silicon 与 Intel 双架构的 Release DMG：
+
+```sh
+./script/package_universal_dmg.sh
+```
+
+产物为 `dist/NeonStack-universal.dmg`，可将磁盘映像中的 Neon Stack 拖入“应用程序”。脚本不会关闭正在运行的游戏。该安装包使用本地临时签名，尚未正式签名或公证；最低支持 macOS 15。
+
 ```sh
 swift test                          # 规则测试
 ./script/build_and_run.sh --verify   # 构建、启动并检查进程
