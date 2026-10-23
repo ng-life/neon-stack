@@ -4,4 +4,5 @@ public struct ClearEvent: Sendable, Equatable {
   public let rows: [Int]
   public let colors: [[Int]]
   public let combo: Int
+  public let reward: PlacementReward
 }

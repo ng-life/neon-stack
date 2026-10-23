@@ -18,7 +18,7 @@ final class GameSessionTests: XCTestCase {
     prepareTetris(&game.boards[0])
     game.act(.hardDrop, player: 0)
     XCTAssertEqual(game.boards[0].lines, 4)
-    XCTAssertEqual(game.boards[0].score, 800)
+    XCTAssertEqual(game.boards[0].score, 2800)
     XCTAssertEqual(game.boards[0].pendingGarbage, 0)
     game.tick(1)
     XCTAssertFalse(game.isOver)
@@ -30,7 +30,7 @@ final class GameSessionTests: XCTestCase {
     XCTAssertEqual(game.boards[0].active, game.boards[1].active)
     prepareTetris(&game.boards[0])
     game.act(.hardDrop, player: 0)
-    XCTAssertEqual(game.boards[1].pendingGarbage, 4)
+    XCTAssertEqual(game.boards[1].pendingGarbage, 14)
     XCTAssertEqual(game.boards[0].pendingGarbage, 0)
   }
 
@@ -44,6 +44,38 @@ final class GameSessionTests: XCTestCase {
     game.tick(1)
     XCTAssertEqual(game.boards[0].score, score)
     XCTAssertFalse(GameSession(mode: .solo, seed: 42).isOver)
+  }
+
+  func testStatisticsCountFourLineClearsBeyondEffectHistory() {
+    var game = GameSession(mode: .versus, seed: 42)
+    for _ in 0..<10 {
+      prepareTetris(&game.boards[0])
+      game.act(.hardDrop, player: 0)
+    }
+    XCTAssertEqual(game.boards[0].fourLineClears, 10)
+    XCTAssertEqual(game.boards[0].lines, 40)
+    XCTAssertEqual(game.boards[0].clearEvents.count, 8)
+    XCTAssertEqual(game.sentAttacks[0], game.boards[1].pendingGarbage)
+    XCTAssertEqual(game.sentAttacks[1], 0)
+  }
+
+  func testAttackStatisticsExcludeCancellationAndIncludeTimedLocks() {
+    var game = GameSession(mode: .versus, seed: 42)
+    prepareTetris(&game.boards[0])
+    game.boards[0].receiveGarbage(3)
+    game.act(.hardDrop, player: 0)
+    XCTAssertEqual(game.sentAttacks, [11, 0])
+    XCTAssertEqual(game.boards[1].pendingGarbage, 11)
+    prepareTetris(&game.boards[0])
+    let before = game.sentAttacks[0]
+    game.tick(0.5)
+    XCTAssertGreaterThan(game.sentAttacks[0], before)
+    XCTAssertEqual(game.sentAttacks[0], game.boards[1].pendingGarbage)
+    XCTAssertEqual(game.boards[0].fourLineClears, 2)
+    var solo = GameSession(mode: .solo, seed: 42)
+    prepareTetris(&solo.boards[0])
+    solo.act(.hardDrop, player: 0)
+    XCTAssertEqual(solo.sentAttacks, [0])
   }
 
   private func prepareTetris(_ board: inout Board) {

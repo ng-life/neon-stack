@@ -25,6 +25,14 @@ final class MusicPlayer {
   private var isRunning = false
   private var generation: Task<Void, Never>?
   private var fadeElapsed = 1.0
+  private var duckRemaining = 0.0
+  private(set) var duckGain: Float = 1
+  var effectiveVolume: Float { current?.volume ?? 0 }
+
+  func duckForClear() {
+    duckRemaining = 0.35
+    DiagnosticLog.shared.record("music_duck")
+  }
   private let logger = Logger(subsystem: "com.nglife.neon-tetris", category: "music")
 
   func update(level: Int, running: Bool, delta: Double) {
@@ -48,23 +56,33 @@ final class MusicPlayer {
           self.fadeElapsed = 0
           self.trackTitle = MusicComposer.title(level: level)
           if self.isRunning { player.play() }
+          DiagnosticLog.shared.record("music_loaded", fields: ["level": String(level)])
           self.logger.info("BGM loaded: level \(level), \(MusicComposer.tempo(level: level)) BPM")
         } catch {
           self.trackTitle = "音乐暂时不可用"
+          DiagnosticLog.shared.record(
+            "music_load_failed", fields: ["error": error.localizedDescription], error: true)
           self.logger.error("BGM load failed: \(error.localizedDescription)")
         }
       }
     }
     guard isRunning else {
+      duckRemaining = 0
+      duckGain = 1
       current?.pause()
       outgoing?.pause()
       return
     }
     if let current, !current.isPlaying { current.play() }
     if let outgoing, !outgoing.isPlaying { outgoing.play() }
+    // Fast attack, a short hold, then a smooth release; repeated clears extend the hold.
+    duckRemaining = max(0, duckRemaining - delta)
+    let target: Float = duckRemaining > 0 ? 0.3 : 1
+    let blend = Float(min(1, max(0, delta) / (target < duckGain ? 0.035 : 0.3)))
+    duckGain += (target - duckGain) * blend
     fadeElapsed = min(1, fadeElapsed + delta)
-    current?.volume = volume * Float(fadeElapsed)
-    outgoing?.volume = volume * Float(1 - fadeElapsed)
+    current?.volume = volume * Float(fadeElapsed) * duckGain
+    outgoing?.volume = volume * Float(1 - fadeElapsed) * duckGain
     if fadeElapsed >= 1 {
       outgoing?.stop()
       outgoing = nil
@@ -73,6 +91,8 @@ final class MusicPlayer {
 
   func stop() {
     generation?.cancel()
+    duckRemaining = 0
+    duckGain = 1
     requestedLevel = 0
     activeLevel = 0
     current?.stop()

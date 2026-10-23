@@ -9,6 +9,8 @@ APP_BUNDLE="$ROOT_DIR/dist/NeonTetris.app"
 ./script/build_icon.sh
 mkdir -p "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources"
 cp "$ROOT_DIR/Assets/AppIcon.icns" "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
+RESOURCE_BUNDLE="$(swift build --show-bin-path)/NeonTetris_NeonTetris.bundle"
+cp -R "$RESOURCE_BUNDLE" "$APP_BUNDLE/Contents/Resources/"
 cp "$(swift build --show-bin-path)/NeonTetris" "$APP_BUNDLE/Contents/MacOS/NeonTetris"
 cat > "$APP_BUNDLE/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>

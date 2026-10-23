@@ -18,15 +18,19 @@ struct NeonTetrisApp: App {
       .defaultSize(width: 1280, height: 880)
       .commands { CommandGroup(replacing: .newItem) {} }
     Settings {
-      SettingsView(settings: audioSettings, sounds: match.sounds, onOpen: match.pauseForSettings)
+      GameSettingsView(match: match, inWindow: true).frame(width: 760, height: 650)
     }
   }
 }
 
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
   func applicationDidFinishLaunching(_ notification: Notification) {
+    DiagnosticLog.shared.startSession()
     NSApp.setActivationPolicy(.regular)
     NSApp.activate(ignoringOtherApps: true)
+  }
+  func applicationWillTerminate(_ notification: Notification) {
+    DiagnosticLog.shared.finishSession()
   }
   func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 }

@@ -12,8 +12,27 @@ final class AudioSettings {
   }
   var effectsVolume: Float { didSet { defaults.set(effectsVolume, forKey: "audio.clear.volume") } }
 
+  var operationsEnabled: Bool {
+    didSet { defaults.set(operationsEnabled, forKey: "audio.operations.enabled") }
+  }
+  var operationsVolume: Float {
+    didSet { defaults.set(operationsVolume, forKey: "audio.operations.volume") }
+  }
+
+  var warningEnabled: Bool {
+    didSet { defaults.set(warningEnabled, forKey: "audio.warning.enabled") }
+  }
+  var warningVolume: Float {
+    didSet { defaults.set(warningVolume, forKey: "audio.warning.volume") }
+  }
+
   init(defaults: UserDefaults = .standard) {
     self.defaults = defaults
+    warningEnabled = defaults.object(forKey: "audio.warning.enabled") as? Bool ?? true
+    warningVolume = Self.volume(defaults.object(forKey: "audio.warning.volume"), fallback: 0.25)
+    operationsEnabled = defaults.object(forKey: "audio.operations.enabled") as? Bool ?? true
+    operationsVolume = Self.volume(
+      defaults.object(forKey: "audio.operations.volume"), fallback: 0.35)
     musicEnabled = defaults.object(forKey: "audio.music.enabled") as? Bool ?? true
     effectsEnabled = defaults.object(forKey: "audio.clear.enabled") as? Bool ?? true
     musicVolume = Self.volume(defaults.object(forKey: "audio.music.volume"), fallback: 0.3)

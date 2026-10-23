@@ -48,7 +48,7 @@ final class BoardTests: XCTestCase {
     piece.y = 0
     board.active = piece
     board.receiveGarbage(2)
-    XCTAssertEqual(board.act(.hardDrop), 2)
+    XCTAssertEqual(board.act(.hardDrop), 12)
     XCTAssertEqual(board.lines, 4)
     XCTAssertEqual(board.pendingGarbage, 0)
     XCTAssertTrue(board.grid.flatMap { $0 }.allSatisfy { $0 == 0 })

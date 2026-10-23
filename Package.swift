@@ -7,7 +7,8 @@ let package = Package(
   products: [.executable(name: "NeonTetris", targets: ["NeonTetris"])],
   targets: [
     .target(name: "TetrisCore"),
-    .executableTarget(name: "NeonTetris", dependencies: ["TetrisCore"]),
+    .executableTarget(
+      name: "NeonTetris", dependencies: ["TetrisCore"], resources: [.copy("Resources/Backgrounds")]),
     .testTarget(name: "TetrisCoreTests", dependencies: ["TetrisCore"]),
     .testTarget(name: "NeonTetrisTests", dependencies: ["NeonTetris", "TetrisCore"]),
   ]

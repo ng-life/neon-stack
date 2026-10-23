@@ -9,8 +9,9 @@ struct ArenaView: NSViewRepresentable {
   let reducedEffects: Bool
 
   func makeNSView(context: Context) -> ARView {
-    let view = ARView(frame: .zero)
-    view.environment.background = .color(NSColor(red: 0.025, green: 0.035, blue: 0.07, alpha: 1))
+    let view = TransparentARView(frame: .zero)
+    view.environment.background = .color(.clear)
+    view.layer?.isOpaque = false
     context.coordinator.setup(view, playerCount: boards.count)
     context.coordinator.update(boards, reducedEffects: reducedEffects)
     return view
@@ -25,7 +26,11 @@ struct ArenaView: NSViewRepresentable {
     var cubes: [[ModelEntity]] = []
     var previous: [[Int]] = []
     var serials = [0, 0]
+    var ghostOutlines: [[Entity]] = []
+    var dangerEdges: [[ModelEntity]] = []
+    var dangerLevels: [DangerLevel] = []
     lazy var effects = ClearEffects(root: root)
+    private var wasReduced = false
     var subscription: (any Cancellable)?
     let palette: [NSColor] = [
       .clear, .systemCyan, .systemYellow, .systemPurple,
@@ -57,6 +62,35 @@ struct ArenaView: NSViewRepresentable {
               color: NSColor(red: 0.06, green: 0.08, blue: 0.13, alpha: 1), roughness: 0.7,
               isMetallic: false)
           ])
+        var edges: [ModelEntity] = []
+        for x in [-5.15, 5.15] {
+          let edge = ModelEntity(
+            mesh: .generateBox(width: 0.09, height: 20.4, depth: 0.08),
+            materials: [UnlitMaterial(color: .clear)])
+          edge.position = [center + Float(x), 0, 0.2]
+          root.addChild(edge)
+          edges.append(edge)
+        }
+        dangerEdges.append(edges)
+        dangerLevels.append(.safe)
+        var outlines: [Entity] = []
+        for _ in 0..<4 {
+          let outline = Entity()
+          for horizontal in [true, false] {
+            for sign: Float in [-1, 1] {
+              let line = ModelEntity(
+                mesh: .generateBox(
+                  width: horizontal ? 0.84 : 0.04, height: horizontal ? 0.04 : 0.84, depth: 0.03),
+                materials: [UnlitMaterial(color: NSColor.white.withAlphaComponent(0.6))])
+              line.position = horizontal ? [0, sign * 0.4, 0] : [sign * 0.4, 0, 0]
+              outline.addChild(line)
+            }
+          }
+          outline.isEnabled = false
+          root.addChild(outline)
+          outlines.append(outline)
+        }
+        ghostOutlines.append(outlines)
         plate.position = [center, 0, -0.6]
         root.addChild(plate)
         var cells: [ModelEntity] = []
@@ -80,30 +114,48 @@ struct ArenaView: NSViewRepresentable {
 
     func update(_ boards: [Board], reducedEffects: Bool) {
       guard cubes.count == boards.count else { return }
+      if reducedEffects && !wasReduced { effects.removeAll() }
+      wasReduced = reducedEffects
       for player in boards.indices {
         let board = boards[player]
         var values = board.grid.flatMap { $0 }
-        for cell in board.ghost.cells where cell.y >= 0 && cell.y < 20 {
-          if values[cell.y * 10 + cell.x] == 0 {
-            values[cell.y * 10 + cell.x] = board.active.kind.rawValue + 10
-          }
+        let center: Float = boards.count == 1 ? 0 : (player == 0 ? -6.5 : 6.5)
+        let activeCells = board.active.cells
+        for (index, cell) in board.ghost.cells.enumerated() {
+          let outline = ghostOutlines[player][index]
+          outline.isEnabled =
+            !board.lost && cell.y >= 0 && cell.y < 20
+            && !activeCells.contains(where: { $0.x == cell.x && $0.y == cell.y })
+          outline.position = [center + Float(cell.x) - 4.5, 9.5 - Float(cell.y), 0.05]
         }
-        for cell in board.active.cells where cell.y >= 0 && cell.y < 20 {
-          values[cell.y * 10 + cell.x] = board.active.kind.rawValue
+        for cell in activeCells where cell.y >= 0 && cell.y < 20 {
+          values[cell.y * 10 + cell.x] = board.active.kind.rawValue + 20
+        }
+        if dangerLevels[player] != board.dangerLevel {
+          dangerLevels[player] = board.dangerLevel
+          let color: NSColor = board.dangerLevel == .critical ? .systemRed : .systemOrange
+          for edge in dangerEdges[player] {
+            edge.isEnabled = board.dangerLevel != .safe
+            edge.model?.materials = [UnlitMaterial(color: color)]
+          }
         }
         for index in 0..<200 where values[index] != previous[player][index] {
           let value = values[index]
           let cube = cubes[player][index]
           cube.isEnabled = value != 0
           if value != 0 {
-            let ghost = value > 10
-            let color = palette[ghost ? value - 10 : value]
-            cube.model?.materials = [
-              SimpleMaterial(
-                color: ghost ? color.withAlphaComponent(0.18) : color,
-                roughness: ghost ? 1 : 0.25, isMetallic: !ghost)
-            ]
-            cube.scale = ghost ? [0.9, 0.9, 0.12] : [1, 1, 1]
+            let active = value > 20
+            let color = palette[active ? value - 20 : value]
+            if active {
+              cube.model?.materials = [UnlitMaterial(color: color)]
+            } else {
+              cube.model?.materials = [
+                SimpleMaterial(
+                  color: color.withAlphaComponent(0.9), roughness: 0.65, isMetallic: false)
+              ]
+            }
+            cube.scale = active ? [1.02, 1.02, 1] : [0.97, 0.97, 0.8]
+
           }
         }
         for event in board.clearEvents where event.serial > serials[player] {
@@ -115,4 +167,9 @@ struct ArenaView: NSViewRepresentable {
       }
     }
   }
+}
+
+/// Let the SwiftUI background remain visible outside the opaque board plates.
+private final class TransparentARView: ARView {
+  override var isOpaque: Bool { false }
 }

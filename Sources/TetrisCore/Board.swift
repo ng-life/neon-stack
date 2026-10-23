@@ -12,10 +12,24 @@ public struct Board: Sendable {
   public private(set) var queue: [PieceKind] = []
   public private(set) var score = 0
   public private(set) var lines = 0
+  public private(set) var fourLineClears = 0
   public private(set) var lost = false
   public private(set) var pendingGarbage = 0
   public private(set) var clearSerial = 0
   public private(set) var clearEvents: [ClearEvent] = []
+  public private(set) var operationSerial = 0
+  public private(set) var operationFeedback: [OperationFeedback] = []
+  public private(set) var lastCombatEvent: CombatEvent?
+  private var combatSerial = 0
+  public var dangerLevel: DangerLevel {
+    guard !lost, let highest = grid.firstIndex(where: { $0.contains { $0 != 0 } }) else {
+      return .safe
+    }
+    let projected = highest - min(8, pendingGarbage)
+    return projected <= 4 ? .critical : (projected <= 7 ? .elevated : .safe)
+  }
+  public private(set) var lastReward: PlacementReward?
+  private var lastRotationKick: Int?
   private var stream: PieceStream
   private var heldThisTurn = false
   private var gravityTime = 0.0
@@ -58,12 +72,14 @@ public struct Board: Sendable {
     case .hardDrop:
       let landing = ghost
       score += (landing.y - active.y) * 2
+      if landing.y != active.y { lastRotationKick = nil }
       active = landing
-      return lock()
+      return lock(hardDrop: true)
     case .clockwise: rotate(clockwise: true)
     case .counterclockwise: rotate(clockwise: false)
     case .hold:
       guard !heldThisTurn else { return 0 }
+      lastRotationKick = nil
       let old = active.kind
       if let held { active = Piece(kind: held) } else { spawn() }
       held = old
@@ -105,6 +121,7 @@ public struct Board: Sendable {
     let candidate = shifted(active, dx: dx, dy: dy)
     guard fits(candidate) else { return false }
     active = candidate
+    lastRotationKick = nil
     if dx != 0 && lockResets < 15 {
       lockTime = 0
       lockResets += 1
@@ -119,10 +136,12 @@ public struct Board: Sendable {
     var candidate = active
     candidate.rotation = to
     // SRS coordinates are expressed with upward-positive y; board y grows downward.
-    for offset in Self.kicks(from: from, to: to, isI: active.kind == .i) {
+    for (kickIndex, offset) in Self.kicks(from: from, to: to, isI: active.kind == .i).enumerated() {
       let kicked = shifted(candidate, dx: offset.x, dy: -offset.y)
       if fits(kicked) {
         active = kicked
+        lastRotationKick = kickIndex
+        emitOperation(.rotate)
         if lockResets < 15 {
           lockTime = 0
           lockResets += 1
@@ -153,40 +172,72 @@ public struct Board: Sendable {
     return values.map { Cell($0.0, $0.1) }
   }
 
-  private mutating func lock() -> Int {
+  private func detectedSpin() -> SpinKind {
+    guard active.kind == .t, let kick = lastRotationKick else { return .none }
+    let x = active.x + 1
+    let y = active.y + 1
+    func occupied(_ dx: Int, _ dy: Int) -> Bool {
+      let cx = x + dx
+      let cy = y + dy
+      if cx < 0 || cx >= Self.width || cy >= Self.height { return true }
+      return cy >= 0 && grid[cy][cx] != 0
+    }
+    // Corners clockwise from top-left; front corners follow the T's pointing direction.
+    let corners = [occupied(-1, -1), occupied(1, -1), occupied(1, 1), occupied(-1, 1)]
+    guard corners.filter({ $0 }).count >= 3 else { return .none }
+    let front = active.rotation
+    return (corners[front] && corners[(front + 1) % 4]) || kick == 4 ? .full : .mini
+  }
+
+  private mutating func emitOperation(_ sound: OperationSound) {
+    operationSerial += 1
+    operationFeedback.append(OperationFeedback(serial: operationSerial, sound: sound))
+    if operationFeedback.count > 32 { operationFeedback.removeFirst() }
+  }
+
+  private mutating func lock(hardDrop: Bool = false) -> Int {
     guard active.cells.allSatisfy({ $0.y >= 0 }) else {
       lost = true
       return 0
     }
+    emitOperation(hardDrop ? .hardDrop : .lock)
+    let spin = detectedSpin()
+    let level = lines / 10 + 1
     for cell in active.cells { grid[cell.y][cell.x] = active.kind.rawValue }
     let clearedRows = grid.indices.filter { !grid[$0].contains(0) }
     let clearedColors = clearedRows.map { grid[$0] }
     let remaining = grid.filter { $0.contains(0) }
     let cleared = 20 - remaining.count
     grid = Array(repeating: Array(repeating: 0, count: 10), count: cleared) + remaining
-    var attack = 0
+    combo = cleared > 0 ? combo + 1 : -1
+    let perfectClear = cleared > 0 && grid.allSatisfy { $0.allSatisfy { $0 == 0 } }
+    let reward = PlacementReward.calculate(
+      rows: cleared, spin: spin, chained: backToBack,
+      perfectClear: perfectClear, combo: combo, level: level)
+    lastReward = reward
+    score += reward.points
+    var attack = reward.attack
+    var cancelledAttack = 0
+    var received = 0
     if cleared > 0 {
+      backToBack = cleared == 4 || spin != .none
       clearSerial += 1
-      combo += 1
       clearEvents.append(
-        ClearEvent(serial: clearSerial, rows: clearedRows, colors: clearedColors, combo: combo))
+        ClearEvent(
+          serial: clearSerial, rows: clearedRows,
+          colors: clearedColors, combo: combo, reward: reward))
       if clearEvents.count > 8 { clearEvents.removeFirst() }
-      score += [0, 100, 300, 500, 800][cleared] * (lines / 10 + 1)
       lines += cleared
-      attack = [0, 0, 1, 2, 4][cleared] + min(4, combo / 2)
-      if cleared == 4 {
-        if backToBack { attack += 1 }
-        backToBack = true
-      } else {
-        backToBack = false
-      }
+      if cleared == 4 { fourLineClears += 1 }
       let cancelled = min(attack, pendingGarbage)
+      cancelledAttack = cancelled
       attack -= cancelled
       pendingGarbage -= cancelled
     } else {
       combo = -1
       // Apply queued garbage at a no-clear lock, capped per placement.
       let amount = min(8, pendingGarbage)
+      received = amount
       pendingGarbage -= amount
       for _ in 0..<amount {
         if grid.removeFirst().contains(where: { $0 != 0 }) { lost = true }
@@ -196,12 +247,18 @@ public struct Board: Sendable {
         grid.append(row)
       }
     }
+    if attack > 0 || cancelledAttack > 0 || received > 0 {
+      combatSerial += 1
+      lastCombatEvent = CombatEvent(
+        serial: combatSerial, sent: attack, cancelled: cancelledAttack, received: received)
+    }
     heldThisTurn = false
     spawn()
     return attack
   }
 
   private mutating func spawn() {
+    lastRotationKick = nil
     active = Piece(kind: queue.removeFirst())
     queue.append(stream.next())
     resetTimers()
